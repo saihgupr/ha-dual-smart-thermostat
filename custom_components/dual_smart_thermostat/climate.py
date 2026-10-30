@@ -68,7 +68,7 @@ from .climate_roles import normalize_climate_roles, validate_climate_roles
 from .config_validation import validate_config_with_models
 from .const import (
     ATTR_CLOSING_TIMEOUT,
-    ATTR_FAN_MODE,
+    ATTR_FAN_SELECTION,
     ATTR_HVAC_ACTION_REASON,
     ATTR_HVAC_POWER_LEVEL,
     ATTR_HVAC_POWER_PERCENT,
@@ -95,6 +95,8 @@ from .const import (
     CONF_FAN_HOT_TOLERANCE,
     CONF_FAN_HOT_TOLERANCE_TOGGLE,
     CONF_FAN_MODE,
+    CONF_FAN_SPEED_STAGES,
+    CONF_FAN_SPEED_STAGES_HYSTERESIS,
     CONF_FAN_ON_WITH_AC,
     CONF_FAN_ON_WITH_HEATER,
     CONF_FLOOR_SENSOR,
@@ -195,6 +197,15 @@ FAN_MODE_SCHEMA = {
     ),
     vol.Optional(CONF_FAN_HOT_TOLERANCE_TOGGLE): cv.entity_id,
     vol.Optional(CONF_FAN_AIR_OUTSIDE): cv.boolean,
+    vol.Optional(CONF_FAN_SPEED_STAGES): [
+        {
+            vol.Required("above"): vol.Coerce(float),
+            vol.Required("speed"): vol.Any(cv.string, vol.Coerce(int)),
+        }
+    ],
+    vol.Optional(CONF_FAN_SPEED_STAGES_HYSTERESIS): vol.All(
+        vol.Coerce(float), vol.Range(min=0)
+    ),
 }
 
 OPENINGS_SCHEMA = {
@@ -1238,9 +1249,18 @@ class DualSmartThermostat(ClimateEntity, RestoreEntity):
         if self._last_hvac_mode is not None and self._last_hvac_mode != HVACMode.OFF:
             attributes[ATTR_LAST_HVAC_MODE] = self._last_hvac_mode
 
-        # Add fan mode to state attributes for persistence
-        if self.features.supports_fan_mode and self.fan_mode is not None:
-            attributes[ATTR_FAN_MODE] = self.fan_mode
+        # Persist the user's fan speed selection (auto or a fixed speed) under
+        # its own key: "fan_mode" belongs to the live applied speed reported
+        # by the fan_mode property, and extra attributes win on collision.
+        # "auto" must survive a restart so staging resumes instead of the
+        # fan sticking at the last staged speed.
+        if self.features.supports_fan_mode:
+            fan_speed = self.features.fan_speed
+            selected = (
+                fan_speed.selected_fan_mode if fan_speed is not None else None
+            )
+            if selected is not None:
+                attributes[ATTR_FAN_SELECTION] = selected
 
         # TODO: set these only if configured to avoid unnecessary DB writes
         if self.features.is_configured_for_hvac_power_levels:

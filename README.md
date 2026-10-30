@@ -238,6 +238,45 @@ Fan speed control works seamlessly with all existing fan-related features:
 
 Your fan speed selection persists across heating/cooling cycles and restarts.
 
+### Temperature-Based Fan Speed Stages
+
+The thermostat can pick the fan speed from how far the room temperature is
+above the target, stepping through speeds as the room gets warmer. Below the
+lowest stage the fan turns off (or goes idle, following the current logic).
+
+```yaml
+climate:
+  - platform: dual_smart_thermostat
+    name: Bedroom Fan
+    heater: input_boolean.dummy_ac
+    ac_mode: true
+    fan: fan.bedroom_fan
+    target_sensor: sensor.bedroom_temperature
+    fan_speed_stages:
+      - above: 1.0
+        speed: low
+      - above: 2.0
+        speed: medium
+      - above: 3.0
+        speed: high
+    fan_speed_stages_hysteresis: 0.5
+```
+
+- `above` is the degrees above target at which the stage engages. Deltas use
+  the thermostat's temperature unit, so enter them in °F on Fahrenheit setups.
+- `speed` accepts a fan mode name (`low`, `medium`, `high`, a preset, or a
+  climate fan mode) or a percentage (`33`, `66`, `100`) for percentage-based
+  fans such as ESPHome `fan.platform: speed` entities.
+- `fan_speed_stages_hysteresis` (optional, default `0`) holds the current
+  stage until the delta drops that far below its threshold, so the speed does
+  not flap around a boundary. Power on/off still respects
+  `min_cycle_duration`.
+- Stages apply in FAN_ONLY mode and whenever the fan runs in cooler mode
+  (inside the `fan_hot_tolerance` band, or alongside the AC with
+  `fan_on_with_ac`). Picking `auto` enables staging; picking a fixed speed
+  (low/medium/high) sticks until you pick another mode. The `auto` selection
+  persists across restarts.
+
 ### Upgrading Switch-Based Fans
 
 If you currently use a `switch` entity for your fan but want speed control, you can create a template fan entity that wraps your switch. Here are several examples:

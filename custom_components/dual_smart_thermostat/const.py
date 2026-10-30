@@ -75,10 +75,15 @@ CONF_FAN_ON_WITH_HEATER = "fan_on_with_heater"
 CONF_FAN_HOT_TOLERANCE = "fan_hot_tolerance"
 CONF_FAN_HOT_TOLERANCE_TOGGLE = "fan_hot_tolerance_toggle"
 CONF_FAN_AIR_OUTSIDE = "fan_air_outside"
+CONF_FAN_SPEED_STAGES = "fan_speed_stages"
+CONF_FAN_SPEED_STAGES_HYSTERESIS = "fan_speed_stages_hysteresis"
 
 # Fan speed control
 ATTR_FAN_MODE = "fan_mode"
 ATTR_FAN_MODES = "fan_modes"
+# Persisted user fan selection (auto or fixed); the live applied speed stays
+# on the fan_mode property/state attribute.
+ATTR_FAN_SELECTION = "fan_selection"
 
 # Fan mode to percentage mappings for percentage-based fan entities (using fan.set_percentage service)
 # Note: Both "auto" and "high" map to 100%. Reading 100% returns "high" as the canonical mode.

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from ..const import (
     ATTR_FAN_MODE,
+    ATTR_FAN_SELECTION,
     CONF_AC_MODE,
     CONF_AUX_HEATER,
     CONF_AUX_HEATING_DUAL_MODE,
@@ -33,6 +34,8 @@ from ..const import (
     CONF_FAN_MODE,
     CONF_FAN_ON_WITH_AC,
     CONF_FAN_ON_WITH_HEATER,
+    CONF_FAN_SPEED_STAGES,
+    CONF_FAN_SPEED_STAGES_HYSTERESIS,
     CONF_FOLLOW_DEVICE_CHANGES,
     CONF_HEAT_COOL_MODE,
     CONF_HEAT_PUMP_COOLING,
@@ -73,6 +76,12 @@ class FeatureManager(StateManager):
         self._fan_tolerance = config.get(CONF_FAN_HOT_TOLERANCE)
         self._fan_air_outside = config.get(CONF_FAN_AIR_OUTSIDE)
         self._fan_tolerance_on_entity_id = config.get(CONF_FAN_HOT_TOLERANCE_TOGGLE)
+        self._fan_speed_stages = self._normalize_fan_speed_stages(
+            config.get(CONF_FAN_SPEED_STAGES)
+        )
+        self._fan_speed_stages_hysteresis = float(
+            config.get(CONF_FAN_SPEED_STAGES_HYSTERESIS, 0.0) or 0.0
+        )
 
         self._dryer_entity_id = config.get(CONF_DRYER)
         self._humidity_sensor_entity_id = config.get(CONF_HUMIDITY_SENSOR)
@@ -242,6 +251,39 @@ class FeatureManager(StateManager):
     def fan_hot_tolerance_on_entity(self) -> bool:
         return self._fan_tolerance_on_entity_id
 
+    @staticmethod
+    def _normalize_fan_speed_stages(stages) -> list[dict] | None:
+        """Validate and sort fan speed stages by `above` threshold."""
+        if not stages:
+            return None
+        normalized = []
+        for entry in stages:
+            if not isinstance(entry, dict):
+                continue
+            if "above" not in entry or "speed" not in entry:
+                continue
+            try:
+                above = float(entry["above"])
+            except (TypeError, ValueError):
+                continue
+            normalized.append({"above": above, "speed": entry["speed"]})
+        if not normalized:
+            return None
+        normalized.sort(key=lambda s: s["above"])
+        return normalized
+
+    @property
+    def fan_speed_stages(self) -> list[dict] | None:
+        return self._fan_speed_stages
+
+    @property
+    def fan_speed_stages_hysteresis(self) -> float:
+        return self._fan_speed_stages_hysteresis
+
+    @property
+    def is_configured_for_fan_speed_stages(self) -> bool:
+        return bool(self._fan_speed_stages)
+
     @property
     def is_configured_for_dryer_mode(self) -> bool:
         """Determines if the dryer mode is configured."""
@@ -405,7 +447,11 @@ class FeatureManager(StateManager):
             _LOGGER.debug("Fan mode restoration skipped: no fan speed control")
             return
 
-        old_fan_mode = old_state.attributes.get(ATTR_FAN_MODE)
+        # Prefer the persisted user selection; fall back to the legacy key
+        # which held the applied speed (identical for manual picks).
+        old_fan_mode = old_state.attributes.get(ATTR_FAN_SELECTION)
+        if old_fan_mode is None:
+            old_fan_mode = old_state.attributes.get(ATTR_FAN_MODE)
         if old_fan_mode is None:
             _LOGGER.debug("No fan mode found in old state, skipping restoration")
             return

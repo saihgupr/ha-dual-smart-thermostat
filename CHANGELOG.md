@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Temperature-based fan speed stages** - Automatically step the fan through speeds based on how far the room temperature is above target (#662)
+  - New `fan_speed_stages` option: list of `{above, speed}` bands (e.g. low above 1.0, medium above 2.0, high above 3.0)
+  - Stage speeds accept fan mode names, preset modes, climate fan modes, or percentages for percentage-based fans
+  - Optional `fan_speed_stages_hysteresis` holds the current stage on the way down to prevent flapping; power on/off still respects `min_cycle_duration`
+  - Below the lowest stage the fan turns off (or goes idle, following the current logic)
+  - Applies in FAN_ONLY mode and whenever the fan runs in cooler mode (fan tolerance band or `fan_on_with_ac`)
 - **Native Fan Speed Control** - Control fan speeds (low, medium, high, auto) directly from the thermostat interface, similar to built-in thermostats (#517)
   - Automatic detection of fan entity capabilities (preset_mode and percentage support)
   - Fan speed control works in FAN_ONLY mode, fan_on_with_ac mode, and fan tolerance mode

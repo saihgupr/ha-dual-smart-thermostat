@@ -23,7 +23,7 @@ from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, State, callback
 
 from ..climate_roles import is_climate_entity
-from ..const import FAN_MODE_TO_PERCENTAGE
+from ..const import FAN_MODE_TO_PERCENTAGE, PERCENTAGE_TO_FAN_MODE
 from .climate_child import peek_climate_child
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,7 +41,13 @@ class FanSpeedControl:
         self.uses_preset_modes = False
         self.current_fan_mode: str | None = None
         self._pending_fan_mode: str | None = None
+        # The user's selection: "auto" means temperature stages decide.
+        # Staging applies speeds without touching this, so a manual fixed
+        # speed sticks (and persists) until the user picks another mode.
+        self.selected_fan_mode: str | None = None
         self._detect_fan_capabilities()
+        if "auto" in self.fan_modes:
+            self.selected_fan_mode = "auto"
 
     def _detect_fan_capabilities(self, fan_state: State | None = None) -> None:
         """Detect if fan entity supports speed control."""
@@ -132,7 +138,7 @@ class FanSpeedControl:
             or self.current_fan_mode is None
         ):
             return
-        await self.async_set_fan_mode(self.current_fan_mode)
+        await self.async_set_fan_mode(self.current_fan_mode, user_selected=False)
 
     @property
     def supports_fan_mode(self) -> bool:
@@ -147,6 +153,7 @@ class FanSpeedControl:
 
         This method validates that the fan mode is valid for the current
         fan device before restoring it. Invalid modes are logged and ignored.
+        A restored mode counts as the user's selection.
         """
         if not self.supports_fan_mode:
             # Entity isn't up yet; hold it for redetect_capabilities (issue #636).
@@ -155,6 +162,7 @@ class FanSpeedControl:
 
         if fan_mode in self.fan_modes:
             self.current_fan_mode = fan_mode
+            self.selected_fan_mode = fan_mode
             _LOGGER.info("Restored fan mode %s for entity %s", fan_mode, self.entity_id)
         else:
             _LOGGER.warning(
@@ -164,8 +172,30 @@ class FanSpeedControl:
                 self.fan_modes,
             )
 
-    async def async_set_fan_mode(self, fan_mode: str) -> None:
-        """Set the fan speed mode."""
+    def should_auto_stage(self) -> bool:
+        """Whether temperature stages may pick the speed right now.
+
+        True when stages are configured, the fan supports speeds, and the
+        user selected "auto" (or never selected a fixed speed on a fan
+        without an auto mode). A manual low/medium/high selection sticks.
+        """
+        if not self.supports_fan_mode or not self._stages():
+            return False
+        if "auto" in self.fan_modes:
+            return self.selected_fan_mode == "auto"
+        return self.selected_fan_mode is None
+
+    async def async_set_fan_mode(
+        self, fan_mode: str, user_selected: bool = True
+    ) -> None:
+        """Set the fan speed mode.
+
+        Args:
+            fan_mode: The fan mode to set.
+            user_selected: True when the user picked it (manual selection or
+                restore). Automatic staging passes False so the applied speed
+                never overwrites the user's selection.
+        """
         if not self.supports_fan_mode:
             _LOGGER.warning(
                 "Fan entity %s does not support speed control", self.entity_id
@@ -211,4 +241,130 @@ class FanSpeedControl:
             )
 
         self.current_fan_mode = fan_mode
+        if user_selected:
+            self.selected_fan_mode = fan_mode
         _LOGGER.info("Fan mode set to %s for entity %s", fan_mode, self.entity_id)
+
+    def _stages(self) -> list[dict] | None:
+        """Return configured speed stages from the owner features, if any."""
+        owner = self.owner
+        stages = getattr(owner, "fan_speed_stages", None)
+        return stages or None
+
+    def _hysteresis(self) -> float:
+        owner = self.owner
+        try:
+            return float(getattr(owner, "fan_speed_stages_hysteresis", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def normalize_stage_speed(self, raw: Any) -> str | None:
+        """Map a stage `speed` value (name or percentage) to a valid fan mode."""
+        if raw is None:
+            return None
+        # Numeric string -> number
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                return None
+            try:
+                number = int(float(text))
+                # "33" / "33.0" behave like 33
+                if str(number) == text or float(text) == number:
+                    raw = number
+                else:
+                    raw = text
+            except ValueError:
+                raw = text
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            pct = int(raw)
+            if self.uses_preset_modes or self._is_climate:
+                _LOGGER.warning(
+                    "Numeric fan stage speed %s ignored for preset/climate fan %s",
+                    raw,
+                    self.entity_id,
+                )
+                return None
+            if pct in PERCENTAGE_TO_FAN_MODE:
+                mode = PERCENTAGE_TO_FAN_MODE[pct]
+                return mode if mode in self.fan_modes else None
+            # Snap 0-100 to low/medium/high thirds for 3-speed fans.
+            if pct <= 0:
+                return None
+            if pct <= 33:
+                mode = "low"
+            elif pct <= 66:
+                mode = "medium"
+            else:
+                mode = "high"
+            # "auto" also maps to 100% but stages should pick a real speed.
+            if mode not in self.fan_modes:
+                # Fall back to closest available mode by percentage value.
+                available = [
+                    (FAN_MODE_TO_PERCENTAGE.get(m, 100), m) for m in self.fan_modes
+                ]
+                if not available:
+                    return None
+                available.sort()
+                mode = min(available, key=lambda kv: abs(kv[0] - pct))[1]
+            return mode
+        if isinstance(raw, str):
+            if raw in self.fan_modes:
+                return raw
+            lowered = raw.lower()
+            for mode in self.fan_modes:
+                if mode.lower() == lowered:
+                    return mode
+            _LOGGER.warning(
+                "Invalid fan stage speed %s for entity %s. Available: %s",
+                raw,
+                self.entity_id,
+                self.fan_modes,
+            )
+            return None
+        return None
+
+    def resolve_staged_speed(self, delta: float | None) -> str | None:
+        """Pick the fan speed for a temperature delta above target.
+
+        `delta` is cur - target. Returns a valid fan mode or None when below
+        the lowest stage (fan should be off/idle). Applies hysteresis on step
+        down so the speed does not flap around a threshold.
+        """
+        stages = self._stages()
+        if not stages or delta is None:
+            return None if stages else None
+        # Highest stage whose threshold is met.
+        target: str | None = None
+        target_idx = -1
+        for idx, stage in enumerate(stages):
+            mode = self.normalize_stage_speed(stage.get("speed"))
+            if mode is None:
+                continue
+            try:
+                above = float(stage.get("above", 0))
+            except (TypeError, ValueError):
+                continue
+            if delta >= above:
+                target = mode
+                target_idx = idx
+        hysteresis = self._hysteresis()
+        if hysteresis <= 0 or self.current_fan_mode is None:
+            return target
+        # Find where the current speed sits in the stage table.
+        current_idx = -1
+        current_above: float | None = None
+        for idx, stage in enumerate(stages):
+            if self.normalize_stage_speed(stage.get("speed")) == self.current_fan_mode:
+                current_idx = idx
+                try:
+                    current_above = float(stage.get("above", 0))
+                except (TypeError, ValueError):
+                    current_above = None
+        if current_idx < 0 or current_above is None:
+            return target
+        if target_idx < current_idx:
+            # Step down (or off): hold current until clearly below its band.
+            if delta >= current_above - hysteresis:
+                return self.current_fan_mode
+        return target
