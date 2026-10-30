@@ -285,6 +285,10 @@ class FanSpeedControl:
             return True
         return (monotonic() - self._last_speed_change) >= interval
 
+    def mark_speed_changed(self) -> None:
+        """Record that the speed audibly changed now (restarts the interval)."""
+        self._last_speed_change = monotonic()
+
     def normalize_stage_speed(self, raw: Any) -> str | None:
         """Map a stage `speed` value (name or percentage) to a valid fan mode."""
         if raw is None:

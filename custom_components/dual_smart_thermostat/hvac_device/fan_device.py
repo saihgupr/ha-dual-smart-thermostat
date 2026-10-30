@@ -102,7 +102,12 @@ class FanDevice(CoolerDevice):
                     self.entity_id,
                 )
                 return
+            # Stage the speed before turning on: the port reapplies
+            # current_fan_mode as part of turn on, so the fan engages at the
+            # staged speed instead of blasting the previous one first.
+            self.speed.current_fan_mode = staged
             await self.async_turn_on()
+            self.speed.mark_speed_changed()
         if staged != self.speed.current_fan_mode:
             if (
                 self.speed.current_fan_mode is not None
