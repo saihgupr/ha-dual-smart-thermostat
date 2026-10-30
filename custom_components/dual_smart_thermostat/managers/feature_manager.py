@@ -36,6 +36,7 @@ from ..const import (
     CONF_FAN_ON_WITH_HEATER,
     CONF_FAN_SPEED_STAGES,
     CONF_FAN_SPEED_STAGES_HYSTERESIS,
+    CONF_FAN_SPEED_STAGES_MIN_INTERVAL,
     CONF_FOLLOW_DEVICE_CHANGES,
     CONF_HEAT_COOL_MODE,
     CONF_HEAT_PUMP_COOLING,
@@ -81,6 +82,9 @@ class FeatureManager(StateManager):
         )
         self._fan_speed_stages_hysteresis = float(
             config.get(CONF_FAN_SPEED_STAGES_HYSTERESIS, 0.0) or 0.0
+        )
+        self._fan_speed_stages_min_interval = self._normalize_fan_interval(
+            config.get(CONF_FAN_SPEED_STAGES_MIN_INTERVAL)
         )
 
         self._dryer_entity_id = config.get(CONF_DRYER)
@@ -272,6 +276,36 @@ class FeatureManager(StateManager):
         normalized.sort(key=lambda s: s["above"])
         return normalized
 
+    @staticmethod
+    def _normalize_fan_interval(value) -> float:
+        """Minimum seconds between automatic speed changes (default 300).
+
+        Accepts a timedelta (YAML time_period), seconds as int/float, or a
+        DurationSelector dict. Zero disables the rate limit.
+        """
+        from datetime import timedelta
+
+        if isinstance(value, timedelta):
+            return max(0.0, value.total_seconds())
+        if isinstance(value, dict):
+            try:
+                if any(k in value for k in ("hours", "minutes")):
+                    total = (
+                        value.get("hours", 0) * 3600
+                        + value.get("minutes", 0) * 60
+                        + value.get("seconds", 0)
+                    )
+                else:
+                    total = value.get("days", 0) * 86400 + value.get("seconds", 0)
+                return max(0.0, float(total))
+            except (TypeError, ValueError):
+                return 300.0
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(0.0, float(value))
+        if value is None:
+            return 300.0
+        return 300.0
+
     @property
     def fan_speed_stages(self) -> list[dict] | None:
         return self._fan_speed_stages
@@ -279,6 +313,11 @@ class FeatureManager(StateManager):
     @property
     def fan_speed_stages_hysteresis(self) -> float:
         return self._fan_speed_stages_hysteresis
+
+    @property
+    def fan_speed_stages_min_interval(self) -> float:
+        """Minimum seconds between automatic fan speed changes."""
+        return self._fan_speed_stages_min_interval
 
     @property
     def is_configured_for_fan_speed_stages(self) -> bool:

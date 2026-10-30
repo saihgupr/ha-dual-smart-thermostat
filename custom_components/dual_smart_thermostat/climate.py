@@ -97,6 +97,7 @@ from .const import (
     CONF_FAN_MODE,
     CONF_FAN_SPEED_STAGES,
     CONF_FAN_SPEED_STAGES_HYSTERESIS,
+    CONF_FAN_SPEED_STAGES_MIN_INTERVAL,
     CONF_FAN_ON_WITH_AC,
     CONF_FAN_ON_WITH_HEATER,
     CONF_FLOOR_SENSOR,
@@ -206,6 +207,10 @@ FAN_MODE_SCHEMA = {
     vol.Optional(CONF_FAN_SPEED_STAGES_HYSTERESIS): vol.All(
         vol.Coerce(float), vol.Range(min=0)
     ),
+    vol.Optional(
+        CONF_FAN_SPEED_STAGES_MIN_INTERVAL,
+        default=timedelta(minutes=5),
+    ): vol.All(cv.time_period, cv.positive_timedelta),
 }
 
 OPENINGS_SCHEMA = {

@@ -104,6 +104,17 @@ class FanDevice(CoolerDevice):
                 return
             await self.async_turn_on()
         if staged != self.speed.current_fan_mode:
+            if (
+                self.speed.current_fan_mode is not None
+                and self.is_active
+                and not self.speed.stage_change_allowed()
+            ):
+                _LOGGER.debug(
+                    "Holding fan %s at %s: minimum interval between speed changes",
+                    self.entity_id,
+                    self.speed.current_fan_mode,
+                )
+                return
             await self.speed.async_set_fan_mode(staged, user_selected=False)
             if getattr(self, "_async_write_ha_state_cb", None) is not None:
                 self._async_write_ha_state_cb()

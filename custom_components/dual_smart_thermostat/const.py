@@ -77,6 +77,7 @@ CONF_FAN_HOT_TOLERANCE_TOGGLE = "fan_hot_tolerance_toggle"
 CONF_FAN_AIR_OUTSIDE = "fan_air_outside"
 CONF_FAN_SPEED_STAGES = "fan_speed_stages"
 CONF_FAN_SPEED_STAGES_HYSTERESIS = "fan_speed_stages_hysteresis"
+CONF_FAN_SPEED_STAGES_MIN_INTERVAL = "fan_speed_stages_min_interval"
 
 # Fan speed control
 ATTR_FAN_MODE = "fan_mode"

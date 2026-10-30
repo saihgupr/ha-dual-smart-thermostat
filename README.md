@@ -271,6 +271,11 @@ climate:
   stage until the delta drops that far below its threshold, so the speed does
   not flap around a boundary. Power on/off still respects
   `min_cycle_duration`.
+- `fan_speed_stages_min_interval` (optional, default 5 minutes) is the
+  minimum time between automatic speed changes, so an oscillating
+  temperature can't flip the speed back and forth audibly. Set `00:00:00`
+  to disable. Manual speed picks always apply immediately (and restart
+  the clock).
 - Stages apply in FAN_ONLY mode and whenever the fan runs in cooler mode
   (inside the `fan_hot_tolerance` band, or alongside the AC with
   `fan_on_with_ac`). Picking `auto` enables staging; picking a fixed speed

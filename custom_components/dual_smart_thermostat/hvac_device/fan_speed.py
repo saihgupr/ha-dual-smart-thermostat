@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from time import monotonic
 from typing import Any
 
 from homeassistant.components.climate import (
@@ -48,6 +49,9 @@ class FanSpeedControl:
         self._detect_fan_capabilities()
         if "auto" in self.fan_modes:
             self.selected_fan_mode = "auto"
+        # Last automatic or manual speed change (monotonic seconds), for the
+        # minimum interval between speed changes.
+        self._last_speed_change: float | None = None
 
     def _detect_fan_capabilities(self, fan_state: State | None = None) -> None:
         """Detect if fan entity supports speed control."""
@@ -213,6 +217,8 @@ class FanSpeedControl:
 
         _LOGGER.debug("Setting fan mode to %s for entity %s", fan_mode, self.entity_id)
 
+        previous_fan_mode = self.current_fan_mode
+
         if self._is_climate:
             # The shared child decides whether the AC is running (and sends it);
             # otherwise the selection is only recorded below for the next turn on.
@@ -243,6 +249,8 @@ class FanSpeedControl:
         self.current_fan_mode = fan_mode
         if user_selected:
             self.selected_fan_mode = fan_mode
+        if previous_fan_mode != fan_mode:
+            self._last_speed_change = monotonic()
         _LOGGER.info("Fan mode set to %s for entity %s", fan_mode, self.entity_id)
 
     def _stages(self) -> list[dict] | None:
@@ -257,6 +265,25 @@ class FanSpeedControl:
             return float(getattr(owner, "fan_speed_stages_hysteresis", 0.0) or 0.0)
         except (TypeError, ValueError):
             return 0.0
+
+    def _min_interval(self) -> float:
+        owner = self.owner
+        try:
+            return float(
+                getattr(owner, "fan_speed_stages_min_interval", 300.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            return 300.0
+
+    def stage_change_allowed(self) -> bool:
+        """Whether an automatic speed change may run right now.
+
+        Manual picks always apply immediately (and restart the clock).
+        """
+        interval = self._min_interval()
+        if interval <= 0 or self._last_speed_change is None:
+            return True
+        return (monotonic() - self._last_speed_change) >= interval
 
     def normalize_stage_speed(self, raw: Any) -> str | None:
         """Map a stage `speed` value (name or percentage) to a valid fan mode."""

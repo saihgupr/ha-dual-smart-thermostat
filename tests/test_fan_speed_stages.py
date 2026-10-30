@@ -135,3 +135,43 @@ def test_restore_prefers_selection_over_legacy():
     FeatureManager._restore_fan_mode(fake_self, old_state)
     assert control.selected_fan_mode == "low"
     assert control.current_fan_mode == "low"
+
+
+def test_stage_change_allowed_without_prior_change():
+    control = _control(_staged_config(), selected="auto")
+    assert control._last_speed_change is None
+    assert control.stage_change_allowed() is True
+
+
+def test_stage_change_blocked_within_interval():
+    from time import monotonic
+
+    control = _control(_staged_config(), selected="auto")
+    control.owner.fan_speed_stages_min_interval = 300.0
+    control._last_speed_change = monotonic()
+    assert control.stage_change_allowed() is False
+    control._last_speed_change = monotonic() - 301
+    assert control.stage_change_allowed() is True
+
+
+def test_stage_change_zero_interval_disables_limit():
+    from time import monotonic
+
+    control = _control(_staged_config(), selected="auto")
+    control.owner.fan_speed_stages_min_interval = 0
+    control._last_speed_change = monotonic()
+    assert control.stage_change_allowed() is True
+
+
+def test_normalize_fan_interval():
+    from datetime import timedelta
+
+    assert FeatureManager._normalize_fan_interval(None) == 300.0
+    assert FeatureManager._normalize_fan_interval(timedelta(minutes=5)) == 300.0
+    assert FeatureManager._normalize_fan_interval(60) == 60.0
+    assert FeatureManager._normalize_fan_interval(0) == 0.0
+    assert FeatureManager._normalize_fan_interval(-5) == 0.0
+    assert (
+        FeatureManager._normalize_fan_interval({"minutes": 2}) == 120.0
+    )
+    assert FeatureManager._normalize_fan_interval("bogus") == 300.0
