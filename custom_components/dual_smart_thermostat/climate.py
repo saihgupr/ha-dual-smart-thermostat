@@ -1198,14 +1198,20 @@ class DualSmartThermostat(ClimateEntity, RestoreEntity):
 
     @property
     def fan_mode(self) -> str | None:
-        """Return the current fan mode."""
+        """Return the user's fan mode selection.
+
+        During auto staging this stays "auto" while the applied speed
+        changes underneath; the fan entity itself reports the real speed.
+        Falls back to the applied speed when nothing was ever selected
+        (fans without an auto mode).
+        """
         if not self.features.supports_fan_mode:
             return None
         # Access fan device through the feature manager
         fan_device = self.features.fan_speed
         if fan_device is None:
             return None
-        return fan_device.current_fan_mode
+        return fan_device.selected_fan_mode or fan_device.current_fan_mode
 
     @property
     def fan_modes(self) -> list[str] | None:
