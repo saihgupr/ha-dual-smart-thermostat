@@ -24,8 +24,11 @@ from .const import (
     CONF_COOLER_SETPOINT_OFFSET,
     CONF_DRYER,
     CONF_FAN,
+    CONF_FAN_HOT_TOLERANCE,
+    CONF_FAN_HOT_TOLERANCE_TOGGLE,
     CONF_FAN_ON_WITH_AC,
     CONF_FAN_ON_WITH_HEATER,
+    CONF_FAN_SPEED_STAGES,
     CONF_FOLLOW_DEVICE_CHANGES,
     CONF_HEAT_COOL_MODE,
     CONF_HEAT_PUMP_COOLING,
@@ -220,9 +223,24 @@ def normalize_climate_roles(config: Mapping[str, Any]) -> dict[str, Any]:
     if source and not config.get(CONF_SENSOR):
         config[CONF_SENSOR] = source
 
-    if fan_shares_cooler(config) and config.get(CONF_FAN_ON_WITH_AC):
+    if fan_shares_cooler(config):
         config[CONF_FAN_ON_WITH_AC] = False
-    if fan_shares_heater(config) and config.get(CONF_FAN_ON_WITH_HEATER):
+    elif (
+        config.get(CONF_FAN_HOT_TOLERANCE) is not None
+        or config.get(CONF_FAN_HOT_TOLERANCE_TOGGLE) is not None
+    ):
+        config[CONF_FAN_ON_WITH_AC] = False
+    elif CONF_FAN_ON_WITH_AC not in config:
+        if (
+            config.get(CONF_COOLER)
+            and not config.get(CONF_AC_MODE)
+        ):
+            config[CONF_FAN_ON_WITH_AC] = True
+        elif config.get(CONF_FAN_SPEED_STAGES):
+            config[CONF_FAN_ON_WITH_AC] = True
+        else:
+            config[CONF_FAN_ON_WITH_AC] = False
+    if fan_shares_heater(config):
         config[CONF_FAN_ON_WITH_HEATER] = False
 
     return config
@@ -288,4 +306,15 @@ def validate_climate_roles(config: dict[str, Any]) -> dict[str, Any]:
     if errors := climate_role_errors(config):
         field, code = errors[0]
         raise vol.Invalid(ERROR_MESSAGES[code], path=[field])
+
+    if CONF_FAN_ON_WITH_AC not in config:
+        if (
+            config.get(CONF_COOLER)
+            and not config.get(CONF_AC_MODE)
+            and not fan_shares_cooler(config)
+            and config.get(CONF_FAN_HOT_TOLERANCE) is None
+            and config.get(CONF_FAN_HOT_TOLERANCE_TOGGLE) is None
+        ):
+            config[CONF_FAN_ON_WITH_AC] = True
+
     return config

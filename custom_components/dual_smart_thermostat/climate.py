@@ -191,7 +191,7 @@ FLOOR_TEMPERATURE_SCHEMA = {
 FAN_MODE_SCHEMA = {
     vol.Optional(CONF_FAN): cv.entity_id,
     vol.Optional(CONF_FAN_MODE): cv.boolean,
-    vol.Optional(CONF_FAN_ON_WITH_AC, default=True): cv.boolean,
+    vol.Optional(CONF_FAN_ON_WITH_AC): cv.boolean,
     vol.Optional(CONF_FAN_ON_WITH_HEATER): cv.boolean,
     vol.Optional(CONF_FAN_HOT_TOLERANCE): vol.All(
         vol.Coerce(float), vol.Range(min=0, min_included=False)

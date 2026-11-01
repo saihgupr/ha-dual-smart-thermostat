@@ -249,7 +249,7 @@ class FeatureManager(StateManager):
         re-enables that case.
         """
         if self._fan_on_with_cooler is None:
-            return True
+            return False
         return self._fan_on_with_cooler
 
     @property

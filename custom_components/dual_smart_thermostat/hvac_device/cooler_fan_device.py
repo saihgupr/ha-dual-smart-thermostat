@@ -155,9 +155,25 @@ class CoolerFanDevice(MultiHvacDevice):
     async def _async_control_when_fan_on_with_cooler(
         self, time=None, force=False, user_initiated: bool = False
     ):
-        await self.fan_device.async_control_hvac(time, force, user_initiated)
         await self.cooler_device.async_control_hvac(time, force, user_initiated)
         self.HVACActionReason = self.cooler_device.HVACActionReason
+
+        is_cooler_active = (
+            self.cooler_device.is_active
+            or self.cooler_device.HVACActionReason
+            == HVACActionReason.TARGET_TEMP_NOT_REACHED
+        )
+
+        if is_cooler_active:
+            self.fan_device.hvac_mode = HVACMode.FAN_ONLY
+            await self.fan_device.async_control_hvac(time, force, user_initiated)
+        elif self.fan_device.is_active:
+            if (
+                user_initiated
+                or self.cooler_device.strategy.hvac_goal_reached
+                or self.fan_device.hvac_controller.min_cycle_elapsed(force)
+            ):
+                await self.fan_device.async_turn_off()
 
     async def _async_control_cooler(
         self, time=None, force=False, user_initiated: bool = False

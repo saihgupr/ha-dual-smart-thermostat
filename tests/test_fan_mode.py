@@ -2536,8 +2536,8 @@ async def test_manual_target_change_stops_cooler_and_fan_together_despite_min_cy
 ) -> None:
     """User raising the target in COOL+fan stops both at once, min_cycle or not.
 
-    Room at 70.2 with a 68 cooling target: cooler and fan both run. Moving
-    the setpoint to 73 (above the room) switches both off immediately even
+    Room at 22.2 with a 20 cooling target: cooler and fan both run. Moving
+    the setpoint to 24 (above the room) switches both off immediately even
     though the run just started (inside the 5-minute minimum cycle).
     """
     hass.config.units = METRIC_SYSTEM
@@ -2562,11 +2562,11 @@ async def test_manual_target_change_stops_cooler_and_fan_together_despite_min_cy
     )
     await hass.async_block_till_done()
 
-    # Room at 70.2, target 68: cooling demand, so cooler and fan both start.
+    # Room at 22.2, target 20: cooling demand, so cooler and fan both start.
+    setup_sensor(hass, 22.2)
     calls = setup_switch_dual(hass, common.ENT_FAN, False, False)
     await common.async_set_hvac_mode(hass, HVACMode.COOL)
-    await common.async_set_temperature(hass, 68)
-    setup_sensor(hass, 70.2)
+    await common.async_set_temperature(hass, 20)
     await hass.async_block_till_done()
 
     turned_on = {call.data["entity_id"] for call in calls if call.service == SERVICE_TURN_ON}
@@ -2577,7 +2577,7 @@ async def test_manual_target_change_stops_cooler_and_fan_together_despite_min_cy
     calls = setup_switch_dual(hass, common.ENT_FAN, True, True)
 
     # When the user raises the target above the room temperature...
-    await common.async_set_temperature(hass, 73)
+    await common.async_set_temperature(hass, 24)
     await hass.async_block_till_done()
 
     # ...both are switched off immediately, inside the minimum cycle.

@@ -339,7 +339,7 @@ async def test_auto_keep_alive_forwards_time_to_controller(
     # async_control_hvac so we can capture the time argument it receives.
     times_seen: list = []
 
-    async def _spy(time=None, force=False):
+    async def _spy(time=None, force=False, **kwargs):
         times_seen.append(time)
 
     with patch(
