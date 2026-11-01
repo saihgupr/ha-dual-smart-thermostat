@@ -38,6 +38,7 @@ class HeaterHvacConroller(GenericHvacController):
         strategy: HvacEnvStrategy,
         any_opening_open: bool,
         time=None,
+        user_initiated: bool = False,
     ) -> None:
         """Check if we need to turn heating on or off when theheater is on."""
 
@@ -51,7 +52,7 @@ class HeaterHvacConroller(GenericHvacController):
         _LOGGER.debug("_async_control_device_when_on, floor hot: %s", is_floor_hot)
         _LOGGER.debug("_async_control_device_when_on, too_hot: %s", too_hot)
 
-        if self.stop_held_by_min_cycle(any_opening_open or is_floor_hot):
+        if self.stop_held_by_min_cycle(any_opening_open or is_floor_hot, user_initiated):
             _LOGGER.debug("Not stopping %s: minimum cycle", self.entity_id)
         elif ((too_hot or is_floor_hot) or any_opening_open) and not is_floor_cold:
             _LOGGER.debug("Turning off heater %s", self.entity_id)
@@ -80,8 +81,14 @@ class HeaterHvacConroller(GenericHvacController):
         strategy: HvacEnvStrategy,
         any_opening_open: bool,
         time=None,
+        user_initiated: bool = False,
     ) -> None:
-        """Check if we need to turn heating on or off when the heater is off."""
+        """Check if we need to turn heating on or off when the heater is off.
+
+        A start still waits for the minimum cycle, even for a user-initiated
+        run (compressor protection). Only user-initiated *stops* skip the
+        wait.
+        """
         _LOGGER.info("%s Controlling hvac while off", self.__class__.__name__)
 
         too_cold = strategy.hvac_goal_not_reached

@@ -489,6 +489,19 @@ def test_tools_validator_agrees_with_yaml_validation(config) -> None:
     assert tool_valid == yaml_valid
 
 
+def test_yaml_fan_on_with_ac_defaults_true_for_separate_fan() -> None:
+    """YAML omitting fan_on_with_ac keeps the fan running with the cooler.
+
+    Regression test: the config flow and models default this to True,
+    but PLATFORM_SCHEMA had no default, so YAML coolers silently staged
+    the fan off when hottest (cooling indicated, fan off).
+    """
+    cfg = PLATFORM_SCHEMA(
+        _yaml(heater="switch.h", cooler="switch.c", fan="switch.f")
+    )
+    assert cfg["fan_on_with_ac"] is True
+
+
 def test_a_climate_only_option_error_is_one_clean_line(hass) -> None:
     """HA's check_config output: no empty path and no dump of the whole config."""
     from homeassistant.config import format_schema_error

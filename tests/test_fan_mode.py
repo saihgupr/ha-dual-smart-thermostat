@@ -2462,6 +2462,137 @@ async def test_set_target_temp_ac_on_dont_switch_to_fan_during_cycle3(
     )
 
 
+@pytest.mark.parametrize("expected_lingering_timers", [True])
+async def test_manual_target_change_stops_cooler_and_fan_immediately_despite_min_cycle(
+    hass: HomeAssistant,
+) -> None:
+    """User raising the target in COOL stops the cooler at once, min_cycle or not.
+
+    min_cycle_duration gates sensor-driven ticks, not explicit user actions:
+    with the cooler freshly started (inside its minimum cycle) and the room
+    at 22.2, setting the target to 24 switches the cooler off immediately
+    instead of holding it on with MIN_CYCLE_DURATION_NOT_REACHED.
+    """
+    hass.config.units = METRIC_SYSTEM
+    assert await async_setup_component(
+        hass,
+        CLIMATE,
+        {
+            "climate": {
+                "platform": DOMAIN,
+                "name": "test",
+                "cold_tolerance": 0.2,
+                "hot_tolerance": 0.2,
+                "ac_mode": True,
+                "heater": common.ENT_SWITCH,
+                "target_sensor": common.ENT_SENSOR,
+                "fan": common.ENT_FAN,
+                "fan_on_with_ac": False,
+                "fan_hot_tolerance": 0.5,
+                "min_cycle_duration": timedelta(minutes=2),
+                "initial_hvac_mode": HVACMode.OFF,
+            }
+        },
+    )
+    await hass.async_block_till_done()
+
+    # Room at 22.2, target 20: the cooler starts (fan_hot_tolerance forces the
+    # run, outside the fan tolerance so the cooler engages).
+    calls = setup_switch_dual(hass, common.ENT_FAN, False, False)
+    await common.async_set_hvac_mode(hass, HVACMode.COOL)
+    await common.async_set_temperature(hass, 20)
+    setup_sensor(hass, 22.2)
+    await hass.async_block_till_done()
+
+    assert len(calls) == 1
+    call = calls[0]
+    assert call.domain == HASS_DOMAIN
+    assert call.service == SERVICE_TURN_ON
+    assert call.data["entity_id"] == common.ENT_SWITCH
+
+    # The cooler switch reports on with a fresh timestamp: inside min_cycle.
+    calls = setup_switch_dual(hass, common.ENT_FAN, True, False)
+
+    # When the user raises the target above the room temperature...
+    await common.async_set_temperature(hass, 24)
+    await hass.async_block_till_done()
+
+    # ...the cooler is switched off immediately, inside its minimum cycle.
+    assert len(calls) == 1
+    call = calls[0]
+    assert call.domain == HASS_DOMAIN
+    assert call.service == SERVICE_TURN_OFF
+    assert call.data["entity_id"] == common.ENT_SWITCH
+    state = hass.states.get(common.ENTITY)
+    assert (
+        state.attributes["hvac_action_reason"]
+        == HVACActionReason.TARGET_TEMP_REACHED
+    )
+
+
+@pytest.mark.parametrize("expected_lingering_timers", [True])
+async def test_manual_target_change_stops_cooler_and_fan_together_despite_min_cycle(
+    hass: HomeAssistant,
+) -> None:
+    """User raising the target in COOL+fan stops both at once, min_cycle or not.
+
+    Room at 70.2 with a 68 cooling target: cooler and fan both run. Moving
+    the setpoint to 73 (above the room) switches both off immediately even
+    though the run just started (inside the 5-minute minimum cycle).
+    """
+    hass.config.units = METRIC_SYSTEM
+    assert await async_setup_component(
+        hass,
+        CLIMATE,
+        {
+            "climate": {
+                "platform": DOMAIN,
+                "name": "test",
+                "cold_tolerance": 0.3,
+                "hot_tolerance": 0.3,
+                "ac_mode": True,
+                "heater": common.ENT_SWITCH,
+                "target_sensor": common.ENT_SENSOR,
+                "fan": common.ENT_FAN,
+                "fan_on_with_ac": True,
+                "min_cycle_duration": timedelta(minutes=5),
+                "initial_hvac_mode": HVACMode.OFF,
+            }
+        },
+    )
+    await hass.async_block_till_done()
+
+    # Room at 70.2, target 68: cooling demand, so cooler and fan both start.
+    calls = setup_switch_dual(hass, common.ENT_FAN, False, False)
+    await common.async_set_hvac_mode(hass, HVACMode.COOL)
+    await common.async_set_temperature(hass, 68)
+    setup_sensor(hass, 70.2)
+    await hass.async_block_till_done()
+
+    turned_on = {call.data["entity_id"] for call in calls if call.service == SERVICE_TURN_ON}
+    assert common.ENT_SWITCH in turned_on
+    assert common.ENT_FAN in turned_on
+
+    # Both switches report on with fresh timestamps: inside min_cycle.
+    calls = setup_switch_dual(hass, common.ENT_FAN, True, True)
+
+    # When the user raises the target above the room temperature...
+    await common.async_set_temperature(hass, 73)
+    await hass.async_block_till_done()
+
+    # ...both are switched off immediately, inside the minimum cycle.
+    turned_off = {
+        call.data["entity_id"] for call in calls if call.service == SERVICE_TURN_OFF
+    }
+    assert common.ENT_SWITCH in turned_off
+    assert common.ENT_FAN in turned_off
+    state = hass.states.get(common.ENTITY)
+    assert (
+        state.attributes["hvac_action_reason"]
+        == HVACActionReason.TARGET_TEMP_REACHED
+    )
+
+
 async def test_set_target_temp_ac_on_after_fan_tolerance_2(
     hass: HomeAssistant, setup_comp_1  # noqa: F811
 ) -> None:

@@ -45,31 +45,39 @@ class HeaterAUXHeaterDevice(MultiHvacDevice):
     def _target_env_attr(self) -> str:
         return "_target_temp_low" if self._features.is_range_mode else "_target_temp"
 
-    async def async_control_hvac(self, time=None, force=False):
+    async def async_control_hvac(
+        self, time=None, force=False, user_initiated: bool = False
+    ):
         _LOGGER.debug({self.__class__.__name__})
         match self._hvac_mode:
             case HVACMode.HEAT:
+                # The aux stages switch directly (no minimum cycle of their
+                # own), so there is nothing for a user run to skip here.
                 # await self.heater_device.async_control_hvac(time, force)
-                await self.async_control_devices(time, force)
+                await self.async_control_devices(time, force, user_initiated)
             case HVACMode.OFF:
                 await self.async_turn_off()
             case _:
                 _LOGGER.warning("Invalid HVAC mode: %s", self._hvac_mode)
 
-    async def async_control_devices(self, time=None, force=False):
+    async def async_control_devices(
+        self, time=None, force=False, user_initiated: bool = False
+    ):
         _LOGGER.debug("async_control_devices at: %s", dt.utcnow())
         _LOGGER.debug("is_active: %s", self.is_active)
         if self.is_active:
-            await self._async_control_devices_when_on(time)
+            await self._async_control_devices_when_on(time, force, user_initiated)
         else:
-            await self._async_control_devices_when_off(time)
+            await self._async_control_devices_when_off(time, force, user_initiated)
 
     async def async_control_devices_forced(self, time=None) -> None:
         """Control the heater and aux heater when forced."""
         _LOGGER.debug("Forced control of devices")
         await self.async_control_devices(time, force=True)
 
-    async def _async_control_devices_when_off(self, time=None) -> None:
+    async def _async_control_devices_when_off(
+        self, time=None, force=False, user_initiated: bool = False
+    ) -> None:
         """Check if we need to turn heating on or off when the heater is off."""
         _LOGGER.info("%s Controlling hvac while off", self.__class__.__name__)
 
@@ -139,7 +147,9 @@ class HeaterAUXHeaterDevice(MultiHvacDevice):
             )
         )
 
-    async def _async_control_devices_when_on(self, time=None) -> None:
+    async def _async_control_devices_when_on(
+        self, time=None, force=False, user_initiated: bool = False
+    ) -> None:
         """Check if we need to turn heating on or off when the heater is off."""
         _LOGGER.info("%s Controlling hvac while on", self.__class__.__name__)
 
@@ -194,7 +204,7 @@ class HeaterAUXHeaterDevice(MultiHvacDevice):
 
         else:
             heater_was_active = self.heater_device.is_active
-            await self.heater_device.async_control_hvac(time, force=False)
+            await self.heater_device.async_control_hvac(time, force, user_initiated)
             self._hvac_action_reason = self.heater_device.HVACActionReason
             # If primary heater was turned off by the control call, also turn off aux
             if (

@@ -2115,3 +2115,70 @@ async def test_assumed_state_child_that_is_off_is_not_sent_a_fan_speed(
 
     assert child.calls == []
     assert speed.current_fan_mode == "strong"  # recorded for the next turn on
+
+
+@pytest.mark.asyncio
+async def test_manual_target_change_applies_stage_within_interval(
+    hass: HomeAssistant, monkeypatch
+):
+    """An explicit target change picks its stage without waiting the interval."""
+    from time import monotonic
+
+    from custom_components.dual_smart_thermostat.hvac_device.generic_hvac_device import (
+        GenericHVACDevice,
+    )
+
+    calls = setup_fan_services(hass)
+    hass.states.async_set("fan.test_fan", "on", {"percentage": 33})
+
+    environment = MagicMock(spec=EnvironmentManager)
+    environment.cur_temp = 71.0
+    environment._target_temp = 68.0
+    environment.target_temp = 68.0
+    environment.is_too_cold.return_value = False
+    openings = MagicMock(spec=OpeningManager)
+    openings.any_opening_open.return_value = False
+    features = MagicMock(spec=FeatureManager)
+    features.is_range_mode = False
+    features.fan_speed_stages = [
+        {"above": 0.3, "speed": "low"},
+        {"above": 3.0, "speed": "medium"},
+        {"above": 5.0, "speed": "high"},
+    ]
+    features.fan_speed_stages_hysteresis = 0.5
+    features.fan_speed_stages_min_interval = 300.0
+    features.is_fan_uses_outside_air = False
+    hvac_power = MagicMock(spec=HvacPowerManager)
+
+    fan_device = FanDevice(
+        hass,
+        "fan.test_fan",
+        timedelta(seconds=5),
+        HVACMode.FAN_ONLY,
+        environment,
+        openings,
+        features,
+        hvac_power,
+    )
+
+    async def no_control(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(GenericHVACDevice, "async_control_hvac", no_control)
+
+    fan_device.speed.current_fan_mode = "low"
+    fan_device.speed._last_speed_change = monotonic()
+
+    # A sensor-driven change inside the interval keeps the current speed.
+    await fan_device.async_control_hvac(force=True)
+    assert fan_device.speed.current_fan_mode == "low"
+
+    # The same change from an explicit target update applies at once.
+    await fan_device.async_control_hvac(force=True, user_initiated=True)
+    assert fan_device.speed.current_fan_mode == "medium"
+    assert any(
+        call.domain == "fan"
+        and call.service == "set_percentage"
+        and call.data["percentage"] == 66
+        for call in calls
+    )

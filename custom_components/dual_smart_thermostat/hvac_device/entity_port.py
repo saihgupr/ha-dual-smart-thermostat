@@ -81,15 +81,23 @@ class EntityPort(ABC):
         return
 
     def holds_stop(self, min_cycle: timedelta) -> bool:
-        """A goal-reached stop must wait for the minimum cycle, even in a forced run.
+        """A goal-reached stop must wait for the minimum cycle on internal runs.
 
-        Only a climate holds it (its compressor); a switch lets a forced run skip
-        the minimum cycle.
+        Only a climate holds it (its compressor); a switch never does.
+        User-initiated runs (explicit changes on the thermostat) skip this
+        check one level up in
+        ``GenericHvacController.stop_held_by_min_cycle``, so by the time this
+        is consulted the wait always applies.
         """
         return False
 
     def holds_start(self, min_cycle: timedelta) -> bool:
-        """A start must wait for the minimum cycle, even in a forced run."""
+        """A start must wait for the minimum cycle, even on user-initiated runs.
+
+        A user-demanded start short-cycles a compressor just the same, so
+        user runs wait here too. Only user-initiated *stops* skip the wait
+        (handled in ``GenericHvacController.stop_held_by_min_cycle``).
+        """
         return False
 
     @abstractmethod

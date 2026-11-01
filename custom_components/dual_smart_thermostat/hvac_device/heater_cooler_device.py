@@ -60,7 +60,9 @@ class HeaterCoolerDevice(MultiHvacDevice):
             self.set_sub_devices_hvac_mode(hvac_mode)
         self._hvac_mode = hvac_mode
 
-    async def async_control_hvac(self, time=None, force: bool = False):
+    async def async_control_hvac(
+        self, time=None, force: bool = False, user_initiated: bool = False
+    ):
 
         _LOGGER.debug(
             "async_control_hvac. hvac_mode: %s, force: %s", self._hvac_mode, force
@@ -69,10 +71,10 @@ class HeaterCoolerDevice(MultiHvacDevice):
         supports_heat_cool = HVACMode.HEAT_COOL in self.hvac_modes
 
         if supports_heat_cool and self.hvac_mode == HVACMode.HEAT_COOL:
-            await self._async_control_heat_cool(time, force)
+            await self._async_control_heat_cool(time, force, user_initiated)
             return
 
-        await super().async_control_hvac(time, force)
+        await super().async_control_hvac(time, force, user_initiated)
 
     def is_cold_or_hot(self) -> tuple[bool, bool, ToleranceDevice]:
         """Check if the environment is too cold or too hot.
@@ -124,7 +126,9 @@ class HeaterCoolerDevice(MultiHvacDevice):
 
         await super().async_set_hvac_mode(hvac_mode)
 
-    async def _async_control_heat_cool(self, time=None, force=False) -> None:
+    async def _async_control_heat_cool(
+        self, time=None, force=False, user_initiated: bool = False
+    ) -> None:
         """Check if we need to turn heating or cooling on or off."""
 
         _LOGGER.info("_async_control_heat_cool. time: %s, force: %s", time, force)
@@ -142,9 +146,11 @@ class HeaterCoolerDevice(MultiHvacDevice):
             await self.heater_device.async_turn_on()
             self._hvac_action_reason = HVACActionReason.LIMIT
         else:
-            await self.async_heater_cooler_toggle(time, force)
+            await self.async_heater_cooler_toggle(time, force, user_initiated)
 
-    async def async_heater_cooler_toggle(self, time=None, force=False) -> None:
+    async def async_heater_cooler_toggle(
+        self, time=None, force=False, user_initiated: bool = False
+    ) -> None:
         """Toggle heater cooler based on temp and tolarance."""
         _LOGGER.debug("async_heater_cooler_toggle time: %s, force: %s", time, force)
         too_cold, too_hot, tolerance_device = self.is_cold_or_hot()
@@ -158,27 +164,33 @@ class HeaterCoolerDevice(MultiHvacDevice):
         )
         match tolerance_device:
             case ToleranceDevice.HEATER:
-                await self.heater_device.async_control_hvac(time, force)
+                await self.heater_device.async_control_hvac(
+                    time, force, user_initiated
+                )
                 self._hvac_action_reason = self.heater_device.HVACActionReason
             case ToleranceDevice.COOLER:
-                await self.cooler_device.async_control_hvac(time, force)
+                await self.cooler_device.async_control_hvac(
+                    time, force, user_initiated
+                )
                 self._hvac_action_reason = self.cooler_device.HVACActionReason
             case _:
-                await self._async_auto_toggle(too_cold, too_hot, time, force)
+                await self._async_auto_toggle(
+                    too_cold, too_hot, time, force, user_initiated
+                )
 
     async def _async_auto_toggle(
-        self, too_cold, too_hot, time=None, force=False
+        self, too_cold, too_hot, time=None, force=False, user_initiated: bool = False
     ) -> None:
         _LOGGER.debug("_async_auto_toggle")
         _LOGGER.debug("too_cold: %s, too_hot: %s", too_cold, too_hot)
         _LOGGER.debug("time: %s, force: %s", time, force)
         if too_cold:
-            await self.heater_device.async_control_hvac(time, force)
+            await self.heater_device.async_control_hvac(time, force, user_initiated)
             self._hvac_action_reason = self.heater_device.HVACActionReason
             if self.cooler_device.is_active:
                 await self.cooler_device.async_turn_off()
         elif too_hot:
-            await self.cooler_device.async_control_hvac(time, force)
+            await self.cooler_device.async_control_hvac(time, force, user_initiated)
             self._hvac_action_reason = self.cooler_device.HVACActionReason
             if self.heater_device.is_active:
                 await self.heater_device.async_turn_off()

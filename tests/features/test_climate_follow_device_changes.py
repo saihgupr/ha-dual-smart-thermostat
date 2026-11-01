@@ -1473,18 +1473,20 @@ async def _heating_with_min_cycle(hass, freezer, **extra):
 
 
 @pytest.mark.parametrize("expected_lingering_timers", [True])
-async def test_a_target_change_does_not_stop_a_climate_inside_its_min_cycle(
+async def test_a_target_change_stops_a_climate_immediately_despite_min_cycle(
     hass, freezer
 ):
+    """An explicit user target change stops a climate at once, min_cycle or not.
+
+    min_cycle_duration gates sensor-driven ticks, not user actions: the stop
+    goes out on the set_temperature call itself instead of waiting out the
+    minimum cycle.
+    """
     child = await _heating_with_min_cycle(hass, freezer)
     await common.async_set_temperature(hass, 15, "climate.test")  # goal reached
     await _idle(hass)
-    assert "turn_off" not in [c[0] for c in child.calls]
-    assert hass.states.get(AC).state == HVACMode.HEAT  # held
-
-    freezer.tick(timedelta(seconds=301))  # the next tick acts on it
-    await _tick(hass, 18.1)
     assert "turn_off" in [c[0] for c in child.calls]
+    assert hass.states.get(AC).state == HVACMode.OFF  # stopped at once
 
 
 @pytest.mark.parametrize("expected_lingering_timers", [True])
@@ -1493,8 +1495,8 @@ async def test_a_target_change_does_not_restart_a_climate_inside_its_min_cycle(
 ):
     child = await _heating_with_min_cycle(hass, freezer)
     await common.async_set_temperature(hass, 15, "climate.test")
-    freezer.tick(timedelta(seconds=301))
-    await _tick(hass, 18.1)  # the held stop goes out
+    await _idle(hass)
+    # the user's stop applies at once, even inside the minimum cycle
     assert hass.states.get(AC).state == HVACMode.OFF
     child.calls.clear()
 
@@ -1583,9 +1585,13 @@ async def test_a_child_the_run_keeps_running_gets_its_new_setpoint(hass):
 
 @pytest.mark.parametrize("expected_lingering_timers", [True])
 async def test_a_zero_keep_alive_does_not_switch_the_min_cycle_off(hass, freezer):
-    """keep_alive is stored as 0:00:00 when unset in the UI (#668)."""
+    """keep_alive is stored as 0:00:00 when unset in the UI (#668).
+
+    The minimum cycle still gates sensor-driven ticks: with the goal reached
+    by a room update (no user action), the stop waits out the cycle.
+    """
     child = await _heating_with_min_cycle(hass, freezer, keep_alive={"seconds": 0})
-    await common.async_set_temperature(hass, 15, "climate.test")
+    await _tick(hass, 23.0)  # the room (not the user) says the goal is reached
     await _idle(hass)
     assert "turn_off" not in [c[0] for c in child.calls]
 

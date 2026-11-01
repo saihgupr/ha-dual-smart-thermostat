@@ -177,15 +177,21 @@ class MultiHvacDevice(HVACDevice, ControlableHVACDevice):
 
         self.set_sub_devices_hvac_mode(hvac_mode)
 
-        await self.async_control_hvac(force=True)
+        # A mode change is an explicit change on the thermostat: a stop the
+        # new mode calls for applies immediately.
+        await self.async_control_hvac(force=True, user_initiated=True)
 
         _LOGGER.info("Hvac mode set to %s", self._hvac_mode)
 
-    async def async_control_hvac(self, time=None, force: bool = False):
+    async def async_control_hvac(
+        self, time=None, force: bool = False, user_initiated: bool = False
+    ):
         async with self.control_pass():
-            await self._async_control_hvac(time, force)
+            await self._async_control_hvac(time, force, user_initiated)
 
-    async def _async_control_hvac(self, time=None, force: bool = False):
+    async def _async_control_hvac(
+        self, time=None, force: bool = False, user_initiated: bool = False
+    ):
         _LOGGER.debug(
             "Controlling hvac %s, time: %s, force: %s", self._hvac_mode, time, force
         )
@@ -217,7 +223,7 @@ class MultiHvacDevice(HVACDevice, ControlableHVACDevice):
 
         for device in self.hvac_devices:
             if self.hvac_mode in device.hvac_modes:
-                await device.async_control_hvac(time, force)
+                await device.async_control_hvac(time, force, user_initiated)
                 self._hvac_action_reason = device.HVACActionReason
 
     async def async_on_startup(self, async_write_ha_state_cb: Callable = None):

@@ -54,15 +54,31 @@ class GenericHvacController(HvacController):
         """If the toggleable hvac device is currently active."""
         return self.port.is_active
 
-    def stop_held_by_min_cycle(self, safety: bool) -> bool:
-        """A goal-reached stop waits for the minimum cycle where the port holds it.
+    def stop_held_by_min_cycle(
+        self, safety: bool, user_initiated: bool = False
+    ) -> bool:
+        """A goal-reached stop waits for the minimum cycle, except for a user action.
 
+        ``user_initiated`` marks an explicit change on the thermostat itself
+        (setpoint/mode/preset change, turn on/off): the user asked for a new
+        state now, so a stop applies immediately. Sensor-driven ticks,
+        keep-alive, timers, startup and device-side adoptions
+        (``user_initiated=False``) still wait out the minimum cycle.
         Openings and floor limits are safety and never wait.
         """
-        return not safety and self.port.holds_stop(self.min_cycle_duration)
+        return (
+            not safety
+            and not user_initiated
+            and self.port.holds_stop(self.min_cycle_duration)
+        )
 
     def start_held_by_min_cycle(self, safety: bool = False) -> bool:
-        """A start waits for the minimum cycle where the port holds it."""
+        """A start waits for the minimum cycle, even in a forced run.
+
+        A forced start still short-cycles a compressor, so user actions that
+        demand heat/cool wait like sensor ticks do. Only a forced *stop* skips
+        the wait (see ``stop_held_by_min_cycle``).
+        """
         return not safety and self.port.holds_start(self.min_cycle_duration)
 
     def ran_long_enough(self) -> bool:
@@ -107,6 +123,7 @@ class GenericHvacController(HvacController):
         strategy: HvacEnvStrategy,
         any_opening_open: bool,
         time=None,
+        user_initiated: bool = False,
     ) -> None:
         """Check if we need to turn heating on or off when theheater is on."""
         _LOGGER.debug(
@@ -118,7 +135,7 @@ class GenericHvacController(HvacController):
         _LOGGER.debug("any_opening_open: %s", any_opening_open)
         _LOGGER.debug("hvac_goal_reached: %s", strategy.hvac_goal_reached)
 
-        if self.stop_held_by_min_cycle(any_opening_open):
+        if self.stop_held_by_min_cycle(any_opening_open, user_initiated):
             _LOGGER.debug("Not stopping %s: minimum cycle", self.entity_id)
         elif strategy.hvac_goal_reached or any_opening_open:
             _LOGGER.info(
@@ -151,8 +168,14 @@ class GenericHvacController(HvacController):
         strategy: HvacEnvStrategy,
         any_opening_open: bool,
         time=None,
+        user_initiated: bool = False,
     ) -> None:
-        """Check if we need to turn heating on or off when the heater is off."""
+        """Check if we need to turn heating on or off when the heater is off.
+
+        A start still waits for the minimum cycle, even for a user-initiated
+        run: a demanded start short-cycles a compressor just the same. Only
+        user-initiated *stops* skip the wait (see ``stop_held_by_min_cycle``).
+        """
         _LOGGER.debug(
             "%s Controlling hvac entity %s while off",
             self.__class__.__name__,

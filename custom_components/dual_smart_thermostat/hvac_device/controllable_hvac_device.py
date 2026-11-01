@@ -25,8 +25,17 @@ class ControlableHVACDevice(ABC):
     _HVACActionReason: HVACActionReason
 
     @abstractmethod
-    async def async_control_hvac(self, time=None, force=False):
-        pass
+    async def async_control_hvac(
+        self, time=None, force=False, user_initiated: bool = False
+    ):
+        """Run one control pass.
+
+        ``force`` runs control now, bypassing inactivity and interval gates
+        (user services, adoptions, openings, timers, startup). Only an
+        explicit change on the thermostat itself sets ``user_initiated``: a
+        user-initiated stop applies immediately, while sensor-driven ticks,
+        adoptions and timers still wait out the minimum cycle.
+        """
 
     @abstractmethod
     def get_device_ids(self) -> list[str]:
@@ -70,7 +79,9 @@ class ControlableHVACDevice(ABC):
             await self.async_stop()
             self._hvac_action_reason = HVACActionReason.NONE
         else:
-            await self.async_control_hvac(force=True)
+            # A mode change is an explicit change on the thermostat: a stop
+            # the new mode calls for applies immediately.
+            await self.async_control_hvac(force=True, user_initiated=True)
 
         _LOGGER.info("Hvac mode set to %s", self._hvac_mode)
 

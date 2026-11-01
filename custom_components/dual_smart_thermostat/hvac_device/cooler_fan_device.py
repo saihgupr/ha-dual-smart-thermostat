@@ -121,7 +121,9 @@ class CoolerFanDevice(MultiHvacDevice):
         """Prevent the device from keep running if HVACMode.OFF."""
         pass
 
-    async def async_control_hvac(self, time=None, force=False):
+    async def async_control_hvac(
+        self, time=None, force=False, user_initiated: bool = False
+    ):
         _LOGGER.info({self.__class__.__name__})
         _LOGGER.debug("hvac_mode: %s", self._hvac_mode)
         self._set_fan_hot_tolerance_on_state()
@@ -132,14 +134,16 @@ class CoolerFanDevice(MultiHvacDevice):
         match self._hvac_mode:
             case HVACMode.COOL:
                 if self._fan_on_with_cooler:
-                    await self._async_control_when_fan_on_with_cooler(time, force)
+                    await self._async_control_when_fan_on_with_cooler(
+                        time, force, user_initiated
+                    )
                 else:
-                    await self._async_control_cooler(time, force)
+                    await self._async_control_cooler(time, force, user_initiated)
 
             case HVACMode.FAN_ONLY:
                 if self.cooler_device.is_active:
                     await self.cooler_device.async_turn_off()
-                await self.fan_device.async_control_hvac(time, force)
+                await self.fan_device.async_control_hvac(time, force, user_initiated)
                 self.HVACActionReason = self.fan_device.HVACActionReason
             case HVACMode.OFF:
                 await self.async_turn_off_all(time=time)
@@ -148,12 +152,16 @@ class CoolerFanDevice(MultiHvacDevice):
                 if self._hvac_mode is not None:
                     _LOGGER.warning("Invalid HVAC mode: %s", self._hvac_mode)
 
-    async def _async_control_when_fan_on_with_cooler(self, time=None, force=False):
-        await self.fan_device.async_control_hvac(time, force)
-        await self.cooler_device.async_control_hvac(time, force)
+    async def _async_control_when_fan_on_with_cooler(
+        self, time=None, force=False, user_initiated: bool = False
+    ):
+        await self.fan_device.async_control_hvac(time, force, user_initiated)
+        await self.cooler_device.async_control_hvac(time, force, user_initiated)
         self.HVACActionReason = self.cooler_device.HVACActionReason
 
-    async def _async_control_cooler(self, time=None, force=False):
+    async def _async_control_cooler(
+        self, time=None, force=False, user_initiated: bool = False
+    ):
         is_within_fan_tolerance = self.environment.is_within_fan_tolerance(
             self.fan_device.target_env_attr
         )
@@ -164,14 +172,23 @@ class CoolerFanDevice(MultiHvacDevice):
         # to ignore cycles as we switch between the fan and cooler device
         # and we want to avoid idle time gaps between the devices
         force_override = (
-            True if self.environment.fan_hot_tolerance is not None else force
+            True
+            if self.environment.fan_hot_tolerance is not None or user_initiated
+            else force
         )
 
         has_cooler_run_long_enough = (
             self.cooler_device.hvac_controller.ran_long_enough()
         )
 
-        if self.cooler_device.is_on and not has_cooler_run_long_enough:
+        # Sensor-driven ticks wait out the minimum cycle; an explicit change
+        # on the thermostat (user_initiated) stops the cooler immediately
+        # and falls through to the goal evaluation below.
+        if (
+            self.cooler_device.is_on
+            and not has_cooler_run_long_enough
+            and not user_initiated
+        ):
             _LOGGER.debug(
                 "Cooler has not run long enough at: %s",
                 datetime.now(timezone.utc),
@@ -189,14 +206,22 @@ class CoolerFanDevice(MultiHvacDevice):
             _LOGGER.debug("force_override: %s", force_override)
 
             self.fan_device.hvac_mode = HVACMode.FAN_ONLY
-            await self.fan_device.async_control_hvac(time, force_override)
+            await self.fan_device.async_control_hvac(
+                time, force_override, user_initiated
+            )
             if self.cooler_device.is_active:
                 await self.cooler_device.async_turn_off()
             self.HVACActionReason = HVACActionReason.TARGET_TEMP_NOT_REACHED_WITH_FAN
         else:
             _LOGGER.debug("outside fan tolerance")
             _LOGGER.debug("fan_hot_tolerance_on: %s", self._fan_hot_tolerance_on)
-            await self.cooler_device.async_control_hvac(time, force_override)
-            if self.fan_device.is_active:
+            await self.cooler_device.async_control_hvac(
+                time, force_override, user_initiated
+            )
+            # Satisfied (outside fan tolerance): the fan must be off. Check
+            # the physical entity state, not just the controller flag, so a
+            # manual turn-on is cleared on this tick and every later one.
+            # This is a stop only: cooler start protection above is untouched.
+            if self.fan_device.port.is_active or self.fan_device.is_active:
                 await self.fan_device.async_turn_off()
             self.HVACActionReason = self.cooler_device.HVACActionReason

@@ -65,20 +65,38 @@ class FanDevice(CoolerDevice):
             return None
         return cur - target
 
-    async def async_control_hvac(self, time=None, force=False):
+    async def async_control_hvac(
+        self, time=None, force=False, user_initiated: bool = False
+    ):
         """Run on/off control, then apply temperature-based speed stages."""
         if not self.speed.should_auto_stage():
             # No stages, no speed support, or the user picked a fixed speed:
             # plain on/off control at the selected speed.
-            await super().async_control_hvac(time, force)
+            await super().async_control_hvac(time, force, user_initiated)
             return
         if self._hvac_mode == HVACMode.OFF:
-            await super().async_control_hvac(time, force)
+            await super().async_control_hvac(time, force, user_initiated)
             return
 
-        staged = self.speed.resolve_staged_speed(self._staged_delta())
+        staged = self.speed.resolve_staged_speed(
+            self._staged_delta(), immediate=user_initiated
+        )
 
-        await super().async_control_hvac(time, force)
+        # A satisfied cooling goal must stop the fan: hysteresis may hold
+        # the last stage (e.g. low) just below its threshold, but it must
+        # not hold the fan on across the goal-reached off-transition
+        # (or resurrect it right after super() stopped it).
+        if staged is not None and self.strategy.hvac_goal_reached:
+            staged = None
+
+        if staged is not None and not self.is_active:
+            # Record the staged speed before control runs: if super() turns
+            # the fan on, its reapply engages the staged speed directly
+            # instead of blasting the previous one first. The reapply marks
+            # the interval clock when the speed actually changes.
+            self.speed.current_fan_mode = staged
+
+        await super().async_control_hvac(time, force, user_initiated)
 
         # Openings win over stages: super() already stopped the fan.
         if self.openings.any_opening_open(self._hvac_mode or HVACMode.FAN_ONLY):
@@ -86,7 +104,15 @@ class FanDevice(CoolerDevice):
 
         if staged is None:
             if self.is_active:
-                if self.hvac_controller.min_cycle_elapsed(force):
+                # Stops never wait on the stage interval/hysteresis above:
+                # only the minimum cycle may hold a sensor-driven stop. An
+                # explicit change on the thermostat (user_initiated) or a
+                # satisfied goal stops the fan immediately.
+                if (
+                    user_initiated
+                    or self.strategy.hvac_goal_reached
+                    or self.hvac_controller.min_cycle_elapsed(force)
+                ):
                     await self.async_turn_off()
                 else:
                     _LOGGER.debug(
@@ -102,17 +128,12 @@ class FanDevice(CoolerDevice):
                     self.entity_id,
                 )
                 return
-            # Stage the speed before turning on: the port reapplies
-            # current_fan_mode as part of turn on, so the fan engages at the
-            # staged speed instead of blasting the previous one first.
-            self.speed.current_fan_mode = staged
             await self.async_turn_on()
-            self.speed.mark_speed_changed()
         if staged != self.speed.current_fan_mode:
             if (
                 self.speed.current_fan_mode is not None
                 and self.is_active
-                and not self.speed.stage_change_allowed()
+                and not self.speed.stage_change_allowed(user_initiated)
             ):
                 _LOGGER.debug(
                     "Holding fan %s at %s: minimum interval between speed changes",

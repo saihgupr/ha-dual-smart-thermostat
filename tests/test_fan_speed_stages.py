@@ -154,6 +154,31 @@ def test_stage_change_blocked_within_interval():
     assert control.stage_change_allowed() is True
 
 
+def test_stage_change_allowed_when_user_initiated():
+    from time import monotonic
+
+    control = _control(_staged_config(), selected="auto")
+    control.owner.fan_speed_stages_min_interval = 300.0
+    control._last_speed_change = monotonic()
+    # An explicit target change must not wait out the interval.
+    assert control.stage_change_allowed(user_initiated=True) is True
+
+
+def test_user_initiated_change_skips_hysteresis():
+    control = _control(
+        [
+            {"above": 0.5, "speed": "low"},
+            {"above": 1.5, "speed": "medium"},
+            {"above": 2.5, "speed": "high"},
+        ],
+        hysteresis=0.5,
+    )
+    control.current_fan_mode = "high"
+    # Inside the hold band: automatic keeps high, a user change steps down.
+    assert control.resolve_staged_speed(2.2) == "high"
+    assert control.resolve_staged_speed(2.2, immediate=True) == "medium"
+
+
 def test_stage_change_zero_interval_disables_limit():
     from time import monotonic
 

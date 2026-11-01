@@ -239,7 +239,17 @@ class FeatureManager(StateManager):
 
     @property
     def is_configured_for_fan_on_with_cooler(self) -> bool:
-        """Determines if the fan mode with cooler is configured."""
+        """Determines if the fan mode with cooler is configured.
+
+        YAML configs written before the schema defaulted this to True
+        omit the key (None); treat that as the default True so a
+        separate fan keeps running alongside the cooler. A fan sharing
+        its cooler climate is forced off by normalize_climate_roles,
+        which stores an explicit False, so this fallback never
+        re-enables that case.
+        """
+        if self._fan_on_with_cooler is None:
+            return True
         return self._fan_on_with_cooler
 
     @property

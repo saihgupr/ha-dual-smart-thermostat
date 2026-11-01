@@ -191,7 +191,7 @@ FLOOR_TEMPERATURE_SCHEMA = {
 FAN_MODE_SCHEMA = {
     vol.Optional(CONF_FAN): cv.entity_id,
     vol.Optional(CONF_FAN_MODE): cv.boolean,
-    vol.Optional(CONF_FAN_ON_WITH_AC): cv.boolean,
+    vol.Optional(CONF_FAN_ON_WITH_AC, default=True): cv.boolean,
     vol.Optional(CONF_FAN_ON_WITH_HEATER): cv.boolean,
     vol.Optional(CONF_FAN_HOT_TOLERANCE): vol.All(
         vol.Coerce(float), vol.Range(min=0, min_included=False)
@@ -1348,7 +1348,9 @@ class DualSmartThermostat(ClimateEntity, RestoreEntity):
             self._set_support_flags()
             self._last_auto_decision = None  # fresh top-down scan on entry
             await self._async_evaluate_auto_and_dispatch(
-                force=True, is_restore=is_restore
+                force=True,
+                is_restore=is_restore,
+                user_initiated=not is_restore,
             )
             self.async_write_ha_state()
             return
@@ -1431,7 +1433,9 @@ class DualSmartThermostat(ClimateEntity, RestoreEntity):
             # Check for auto-preset selection after setting temperature
             await self._check_auto_preset_selection()
 
-            await self._async_control_climate(force=True)
+            # An explicit target change: a stop the new target calls for
+            # applies immediately instead of waiting out the minimum cycle.
+            await self._async_control_climate(force=True, user_initiated=True)
             self.async_write_ha_state()
 
     async def async_set_humidity(self, humidity: float) -> None:
@@ -1444,7 +1448,8 @@ class DualSmartThermostat(ClimateEntity, RestoreEntity):
         # Check for auto-preset selection after setting humidity
         await self._check_auto_preset_selection()
 
-        await self._async_control_climate(force=True)
+        # An explicit target change: apply immediately, not after the cycle.
+        await self._async_control_climate(force=True, user_initiated=True)
         self.async_write_ha_state()
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
@@ -1796,21 +1801,32 @@ class DualSmartThermostat(ClimateEntity, RestoreEntity):
 
         self.async_write_ha_state()
 
-    async def _async_control_climate(self, time=None, force=False) -> None:
-        """Control the climate device based on config."""
+    async def _async_control_climate(
+        self, time=None, force=False, user_initiated: bool = False
+    ) -> None:
+        """Control the climate device based on config.
+
+        ``user_initiated`` is True only for an explicit change on the
+        thermostat itself (service call): a stop the new state calls for
+        applies immediately instead of waiting out the minimum cycle.
+        Sensor ticks, keep-alive, timers and device-side adoptions leave it
+        False so the compressor stays protected.
+        """
 
         _LOGGER.debug("Attempting to control climate, time %s, force %s", time, force)
 
         async with self._temp_lock:
             if self._hvac_mode == HVACMode.AUTO and self._auto_evaluator is not None:
-                await self._async_evaluate_auto_and_dispatch(time=time, force=force)
+                await self._async_evaluate_auto_and_dispatch(
+                    time=time, force=force, user_initiated=user_initiated
+                )
                 return
 
             if self.hvac_device.hvac_mode == HVACMode.OFF and time is None:
                 _LOGGER.debug("Climate is off, skipping control")
                 return
 
-            await self.hvac_device.async_control_hvac(time, force)
+            await self.hvac_device.async_control_hvac(time, force, user_initiated)
 
             _LOGGER.debug(
                 "updating HVACActionReason: %s", self.hvac_device.HVACActionReason
@@ -1831,7 +1847,12 @@ class DualSmartThermostat(ClimateEntity, RestoreEntity):
         await self._async_control_climate(time=None, force=force)
 
     async def _async_evaluate_auto_and_dispatch(
-        self, *, time=None, force: bool = False, is_restore: bool = False
+        self,
+        *,
+        time=None,
+        force: bool = False,
+        is_restore: bool = False,
+        user_initiated: bool = False,
     ) -> None:
         """Run the AutoModeEvaluator and dispatch to the chosen sub-mode.
 
@@ -1871,7 +1892,9 @@ class DualSmartThermostat(ClimateEntity, RestoreEntity):
                 self._target_humidity = self.environment.target_humidity
             await self.hvac_device.async_set_hvac_mode(decision.next_mode)
 
-        await self.hvac_device.async_control_hvac(time=time, force=force)
+        await self.hvac_device.async_control_hvac(
+            time=time, force=force, user_initiated=user_initiated
+        )
 
         self._hvac_action_reason = decision.reason
         self._publish_hvac_action_reason(decision.reason)
@@ -2009,7 +2032,8 @@ class DualSmartThermostat(ClimateEntity, RestoreEntity):
         # Update template listeners for new preset
         await self._setup_template_listeners()
 
-        await self._async_control_climate(force=True)
+        # An explicit preset change: apply immediately, not after the cycle.
+        await self._async_control_climate(force=True, user_initiated=True)
         self.async_write_ha_state()
 
     def _publish_hvac_action_reason(self, reason) -> None:

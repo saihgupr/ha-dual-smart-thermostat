@@ -181,7 +181,9 @@ class GenericHVACDevice(
                 target_temp,
             )
 
-    async def async_control_hvac(self, time=None, force=False):
+    async def async_control_hvac(
+        self, time=None, force: bool = False, user_initiated: bool = False
+    ):
         """Controls the HVAC of the device."""
 
         _LOGGER.debug(
@@ -235,12 +237,14 @@ class GenericHVACDevice(
                 self.strategy,
                 any_opening_open,
                 time,
+                user_initiated,
             )
         else:
             await self.hvac_controller.async_control_device_when_off(
                 self.strategy,
                 any_opening_open,
                 time,
+                user_initiated,
             )
 
         _LOGGER.debug(

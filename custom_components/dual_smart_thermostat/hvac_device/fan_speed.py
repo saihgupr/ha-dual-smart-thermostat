@@ -275,19 +275,19 @@ class FanSpeedControl:
         except (TypeError, ValueError):
             return 300.0
 
-    def stage_change_allowed(self) -> bool:
+    def stage_change_allowed(self, user_initiated: bool = False) -> bool:
         """Whether an automatic speed change may run right now.
 
-        Manual picks always apply immediately (and restart the clock).
+        Manual picks always apply immediately (and restart the clock), and so
+        does an explicit target change on the thermostat: the user's new
+        target should pick its stage without waiting out the interval.
         """
+        if user_initiated:
+            return True
         interval = self._min_interval()
         if interval <= 0 or self._last_speed_change is None:
             return True
         return (monotonic() - self._last_speed_change) >= interval
-
-    def mark_speed_changed(self) -> None:
-        """Record that the speed audibly changed now (restarts the interval)."""
-        self._last_speed_change = monotonic()
 
     def normalize_stage_speed(self, raw: Any) -> str | None:
         """Map a stage `speed` value (name or percentage) to a valid fan mode."""
@@ -355,12 +355,15 @@ class FanSpeedControl:
             return None
         return None
 
-    def resolve_staged_speed(self, delta: float | None) -> str | None:
+    def resolve_staged_speed(
+        self, delta: float | None, *, immediate: bool = False
+    ) -> str | None:
         """Pick the fan speed for a temperature delta above target.
 
         `delta` is cur - target. Returns a valid fan mode or None when below
         the lowest stage (fan should be off/idle). Applies hysteresis on step
-        down so the speed does not flap around a threshold.
+        down so the speed does not flap around a threshold; `immediate` skips
+        it, for an explicit target change that must apply at once.
         """
         stages = self._stages()
         if not stages or delta is None:
@@ -379,7 +382,7 @@ class FanSpeedControl:
             if delta >= above:
                 target = mode
                 target_idx = idx
-        hysteresis = self._hysteresis()
+        hysteresis = 0.0 if immediate else self._hysteresis()
         if hysteresis <= 0 or self.current_fan_mode is None:
             return target
         # Find where the current speed sits in the stage table.

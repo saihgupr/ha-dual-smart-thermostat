@@ -124,6 +124,7 @@ class HvacController(ABC):
         strategy: HvacEnvStrategy,
         any_opening_open: bool,
         time=None,
+        user_initiated: bool = False,
     ) -> None:
         pass
 
@@ -133,9 +134,12 @@ class HvacController(ABC):
         strategy: HvacEnvStrategy,
         any_opening_open: bool,
         time=None,
+        user_initiated: bool = False,
     ) -> None:
         pass
 
     @abstractmethod
-    def needs_control(self, active: bool, hvac_mode: HVACMode, time=None) -> bool:
+    def needs_control(
+        self, active: bool, hvac_mode: HVACMode, time=None, force: bool = False
+    ) -> bool:
         pass

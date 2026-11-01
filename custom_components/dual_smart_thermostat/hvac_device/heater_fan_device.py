@@ -51,7 +51,9 @@ class HeaterFanDevice(MultiHvacDevice):
         if self.fan_device is None or self.heater_device is None:
             _LOGGER.error("Fan or heater device is not found")
 
-    async def async_control_hvac(self, time=None, force=False):
+    async def async_control_hvac(
+        self, time=None, force=False, user_initiated: bool = False
+    ):
         _LOGGER.debug(
             "%s async_control_hvac, mode: %s", self._device_type, self._hvac_mode
         )
@@ -68,13 +70,13 @@ class HeaterFanDevice(MultiHvacDevice):
         if self._hvac_mode == HVACMode.FAN_ONLY:
             if self.heater_device.is_active:
                 await self.heater_device.async_turn_off()
-            await self.fan_device.async_control_hvac(time, force)
+            await self.fan_device.async_control_hvac(time, force, user_initiated)
             self._hvac_action_reason = self.fan_device.HVACActionReason
             return
 
         # Heating/cooling mode: run the heater/heat pump. When opted in, the fan
         # follows it as the air handler (#622) - on only while it runs (#651).
-        await self.heater_device.async_control_hvac(time, force)
+        await self.heater_device.async_control_hvac(time, force, user_initiated)
         self._hvac_action_reason = self.heater_device.HVACActionReason
 
         if self._fan_on_with_heater and self.heater_device.is_active:

@@ -1992,11 +1992,15 @@ async def test_shared_ac_walk_ends_in_each_mode_with_no_trailing_off(
 
 
 @pytest.mark.parametrize("expected_lingering_timers", [True])
-async def test_manual_target_change_waits_for_min_cycle_on_a_climate(
+async def test_manual_target_change_stops_a_climate_immediately_despite_min_cycle(
     hass: HomeAssistant,
 ) -> None:
-    """Unlike switches (master: force=True skips min_cycle), a climate's compressor
-    is protected from target changes too: the stop waits for the minimum cycle."""
+    """Unlike sensor ticks, a user's target change stops a climate at once.
+
+    min_cycle_duration still protects a climate's compressor from
+    sensor-driven churn and from forced *starts*; a forced *stop* applies
+    immediately.
+    """
     hass.states.async_set(SENSOR, 20.0)
     await _setup(
         hass,
@@ -2012,7 +2016,7 @@ async def test_manual_target_change_waits_for_min_cycle_on_a_climate(
     await common.async_set_temperature(hass, 19, "climate.test")  # the user acts
     await hass.async_block_till_done()
 
-    assert hass.states.get(AC).state == HVACMode.HEAT  # held
+    assert hass.states.get(AC).state == HVACMode.OFF  # stopped at once
 
 
 async def test_fan_speed_reapply_follows_an_external_fan_change(
