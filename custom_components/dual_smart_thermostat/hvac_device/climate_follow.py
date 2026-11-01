@@ -136,6 +136,7 @@ class ClimateFollower:
             and fan_mode in speed.fan_modes
         ):
             speed.current_fan_mode = fan_mode
+            speed.selected_fan_mode = fan_mode
             sink.async_write_ha_state()
 
     async def _async_resend_fan(self, child: ClimateChild) -> None:

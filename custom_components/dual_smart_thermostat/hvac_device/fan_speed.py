@@ -47,7 +47,7 @@ class FanSpeedControl:
         # speed sticks (and persists) until the user picks another mode.
         self.selected_fan_mode: str | None = None
         self._detect_fan_capabilities()
-        if "auto" in self.fan_modes:
+        if self._stages() and "auto" in self.fan_modes:
             self.selected_fan_mode = "auto"
         # Last automatic or manual speed change (monotonic seconds), for the
         # minimum interval between speed changes.

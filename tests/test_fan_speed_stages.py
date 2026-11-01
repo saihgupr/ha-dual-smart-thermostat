@@ -112,9 +112,7 @@ def test_no_stages_disables_staging():
 
 
 def test_fan_without_auto_stages_until_fixed():
-    control = _control(
-        _staged_config(), modes=["low", "medium", "high"], selected=None
-    )
+    control = _control(_staged_config(), modes=["low", "medium", "high"], selected=None)
     assert control.should_auto_stage() is True
     control.selected_fan_mode = "medium"
     assert control.should_auto_stage() is False
@@ -196,15 +194,12 @@ def test_normalize_fan_interval():
     assert FeatureManager._normalize_fan_interval(60) == 60.0
     assert FeatureManager._normalize_fan_interval(0) == 0.0
     assert FeatureManager._normalize_fan_interval(-5) == 0.0
-    assert (
-        FeatureManager._normalize_fan_interval({"minutes": 2}) == 120.0
-    )
+    assert FeatureManager._normalize_fan_interval({"minutes": 2}) == 120.0
     assert FeatureManager._normalize_fan_interval("bogus") == 300.0
 
 
 async def test_fan_on_with_ac_engages_staged_speed(hass):
     """When fan_on_with_ac is true and cooler turns on, fan turns on at staged speed."""
-    from datetime import timedelta
     from homeassistant.components import input_boolean, input_number
     from homeassistant.components.climate import HVACMode
     from homeassistant.components.climate.const import DOMAIN as CLIMATE
@@ -289,7 +284,8 @@ async def test_fan_on_with_ac_engages_staged_speed(hass):
 
     # Verify cooler turn_on service call
     cooler_turned_on = any(
-        c.service == SERVICE_TURN_ON and c.data.get("entity_id") == "input_boolean.cooler"
+        c.service == SERVICE_TURN_ON
+        and c.data.get("entity_id") == "input_boolean.cooler"
         for c in calls
     )
     assert cooler_turned_on, f"Cooler was not turned on. Calls: {calls}"
@@ -318,5 +314,146 @@ async def test_fan_on_with_ac_engages_staged_speed(hass):
         c.service == SERVICE_TURN_OFF and c.data.get("entity_id") == "fan.test_fan"
         for c in calls
     )
-    assert fan_turned_off, f"Fan was not turned off when cooling satisfied. Calls: {calls}"
+    assert (
+        fan_turned_off
+    ), f"Fan was not turned off when cooling satisfied. Calls: {calls}"
 
+
+async def test_fan_on_with_ac_percentage_fan_stages(hass):
+    """When fan_on_with_ac is true and fan is percentage-based, fan turns on and sets percentage."""
+    from homeassistant.components import input_boolean, input_number
+    from homeassistant.components.climate import HVACMode
+    from homeassistant.components.climate.const import DOMAIN as CLIMATE
+    from homeassistant.const import SERVICE_TURN_ON, SERVICE_TURN_OFF
+    from homeassistant.core import callback, DOMAIN as HASS_DOMAIN
+    from homeassistant.setup import async_setup_component
+    from homeassistant.util.unit_system import METRIC_SYSTEM
+    from custom_components.dual_smart_thermostat.const import DOMAIN
+    from . import common, setup_sensor
+
+    hass.config.units = METRIC_SYSTEM
+    calls = []
+
+    @callback
+    def log_call(call):
+        calls.append(call)
+        eid = call.data.get("entity_id")
+        if eid and call.service in (SERVICE_TURN_ON, SERVICE_TURN_OFF):
+            new_st = "on" if call.service == SERVICE_TURN_ON else "off"
+            cur_attrs = hass.states.get(eid).attributes if hass.states.get(eid) else {}
+            hass.states.async_set(eid, new_st, cur_attrs)
+        elif eid and call.service == "set_percentage":
+            cur_attrs = hass.states.get(eid).attributes if hass.states.get(eid) else {}
+            cur_attrs = dict(cur_attrs)
+            cur_attrs["percentage"] = call.data.get("percentage")
+            hass.states.async_set(eid, "on", cur_attrs)
+
+    hass.services.async_register(HASS_DOMAIN, SERVICE_TURN_ON, log_call)
+    hass.services.async_register(HASS_DOMAIN, SERVICE_TURN_OFF, log_call)
+    hass.services.async_register("fan", "set_percentage", log_call)
+
+    assert await async_setup_component(
+        hass,
+        input_boolean.DOMAIN,
+        {"input_boolean": {"cooler_pct": None, "dummy_pct": None}},
+    )
+    assert await async_setup_component(
+        hass,
+        input_number.DOMAIN,
+        {
+            "input_number": {
+                "temp_pct": {
+                    "name": "test",
+                    "initial": 10,
+                    "min": 0,
+                    "max": 40,
+                    "step": 1,
+                }
+            }
+        },
+    )
+
+    hass.states.async_set(
+        "fan.test_pct_fan",
+        "off",
+        {
+            "preset_modes": [],
+            "percentage": 0,
+            "percentage_step": 33.333333333333336,
+        },
+    )
+
+    assert await async_setup_component(
+        hass,
+        CLIMATE,
+        {
+            "climate": {
+                "platform": DOMAIN,
+                "name": "test_pct",
+                "heater": "input_boolean.dummy_pct",
+                "cooler": "input_boolean.cooler_pct",
+                "fan": "fan.test_pct_fan",
+                "fan_on_with_ac": True,
+                "target_sensor": common.ENT_SENSOR,
+                "initial_hvac_mode": HVACMode.OFF,
+                "fan_speed_stages": [
+                    {"above": 0.3, "speed": "low"},
+                    {"above": 3.0, "speed": "medium"},
+                    {"above": 5.0, "speed": "high"},
+                ],
+            }
+        },
+    )
+    await hass.async_block_till_done()
+
+    # Turn on thermostat in COOL mode with target 20
+    await common.async_set_hvac_mode(hass, HVACMode.COOL, "climate.test_pct")
+    await common.async_set_temperature(hass, 20, "climate.test_pct")
+    await hass.async_block_till_done()
+
+    # Sensor at 24 -> delta is 4.0, which meets "medium" stage (above 3.0)
+    calls.clear()
+    setup_sensor(hass, 24)
+    await hass.async_block_till_done()
+
+    # Verify cooler turn_on service call
+    cooler_turned_on = any(
+        c.service == SERVICE_TURN_ON
+        and c.data.get("entity_id") == "input_boolean.cooler_pct"
+        for c in calls
+    )
+    assert cooler_turned_on, f"Cooler was not turned on. Calls: {calls}"
+
+    # Verify fan turned on and staged percentage was applied
+    fan_turned_on = any(
+        c.service == SERVICE_TURN_ON and c.data.get("entity_id") == "fan.test_pct_fan"
+        for c in calls
+    )
+    assert fan_turned_on, f"Fan was not turned on. Calls: {calls}"
+
+    pct_calls = [
+        c
+        for c in calls
+        if c.service == "set_percentage"
+        and c.data.get("entity_id") == "fan.test_pct_fan"
+    ]
+    assert len(pct_calls) > 0, f"set_percentage was not called for fan. Calls: {calls}"
+    assert (
+        pct_calls[-1].data.get("percentage") == 66
+    ), f"Expected 66% (medium), got {pct_calls[-1].data.get('percentage')}"
+
+    # Now drop temperature to 19 -> goal reached
+    calls.clear()
+    setup_sensor(hass, 19)
+    await hass.async_block_till_done()
+
+    # Verify cooler is OFF
+    assert hass.states.get("input_boolean.cooler_pct").state == "off"
+    # Verify fan is turned off
+    fan_turned_off = any(
+        c.service == SERVICE_TURN_OFF and c.data.get("entity_id") == "fan.test_pct_fan"
+        for c in calls
+    )
+    assert (
+        fan_turned_off
+    ), f"Fan was not turned off when cooling satisfied. Calls: {calls}"
